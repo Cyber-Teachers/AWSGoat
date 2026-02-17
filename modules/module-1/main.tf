@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.24.0"
+      version = "~> 5.84.0"
     }
   }
 }
@@ -3212,6 +3212,9 @@ resource "aws_s3_bucket" "bucket_upload" {
     Name        = "Production bucket"
     Environment = "Prod"
   }
+  timeouts {
+    create = "5m"
+  }
 }
 
 # ACL fixes required for AWS S3 APR 2023 updates.
@@ -3222,6 +3225,7 @@ resource "aws_s3_bucket_public_access_block" "bucket_upload" {
   block_public_policy     = false
   ignore_public_acls      = false
   restrict_public_buckets = false
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_ownership_controls" "bucket_upload" {
@@ -3229,6 +3233,7 @@ resource "aws_s3_bucket_ownership_controls" "bucket_upload" {
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_acl" "bucket_upload" {
@@ -3239,6 +3244,7 @@ resource "aws_s3_bucket_acl" "bucket_upload" {
 
   bucket = aws_s3_bucket.bucket_upload.id
   acl    = "private"
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_policy" "allow_access_for_prod" {
@@ -3298,6 +3304,7 @@ resource "aws_s3_bucket" "dev" {
     Name        = "Development bucket"
     Environment = "Dev"
   }
+  timeouts { create = "5m" }
 }
 
 
@@ -3309,6 +3316,7 @@ resource "aws_s3_bucket_public_access_block" "dev" {
   block_public_policy     = false
   ignore_public_acls      = false
   restrict_public_buckets = false
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_ownership_controls" "dev" {
@@ -3316,6 +3324,7 @@ resource "aws_s3_bucket_ownership_controls" "dev" {
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_acl" "dev" {
@@ -3326,6 +3335,7 @@ resource "aws_s3_bucket_acl" "dev" {
 
   bucket = aws_s3_bucket.dev.id
   acl    = "public-read"
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_policy" "allow_access_for_dev" {
@@ -3379,6 +3389,7 @@ resource "aws_s3_bucket" "bucket_temp" {
     Name        = "Temporary bucket"
     Environment = "Dev"
   }
+  timeouts { create = "5m" }
 }
 
 # ACL fixes required for AWS S3 APR 2023 updates.
@@ -3389,6 +3400,7 @@ resource "aws_s3_bucket_public_access_block" "bucket_temp" {
   block_public_policy     = false
   ignore_public_acls      = false
   restrict_public_buckets = false
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_ownership_controls" "bucket_temp" {
@@ -3396,6 +3408,7 @@ resource "aws_s3_bucket_ownership_controls" "bucket_temp" {
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
+  timeouts { create = "3m" }
 }
 
 resource "aws_s3_bucket_acl" "bucket_temp" {
@@ -3406,6 +3419,7 @@ resource "aws_s3_bucket_acl" "bucket_temp" {
 
   bucket = aws_s3_bucket.bucket_temp.id
   acl    = "public-read"
+  timeouts { create = "3m" }
 }
 
 /* Uploading all files to ec2-temp-bucket-ACCOUNT_ID bucket */
@@ -3437,6 +3451,7 @@ resource "aws_s3_bucket" "bucket_tf_files" {
     Name        = "Do not delete Bucket"
     Environment = "Dev"
   }
+  timeouts { create = "5m" }
 }
 
 
