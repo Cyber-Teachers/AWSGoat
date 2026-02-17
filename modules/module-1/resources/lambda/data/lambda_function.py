@@ -41,7 +41,7 @@ def upload_file(img_data, bucket, url=None):
         file = base64.b64decode(img_data)
     try:
         obj.put(Body=file, ACL="public-read")
-        location = "us-east-1"
+        location = os.environ.get("AWS_REGION", "eu-west-3")
         object_url = "https://%s.s3.amazonaws.com/%s" % (bucket, object_name)
         return object_url
     except Exception as e:

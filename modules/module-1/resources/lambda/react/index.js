@@ -7,7 +7,7 @@ exports.handler = async function(event) {
     
     console.log(path.resolve("./index.html"));
     var html = fs.readFileSync(__dirname +'/index.html', 'utf8');
-    html = html.replace(/S3_BUCKET/g,  "https://replace-bucket-name.s3.us-east-1.amazonaws.com/build");
+    html = html.replace(/S3_BUCKET/g,  "https://replace-bucket-name.s3.REPLACE_REGION.amazonaws.com/build");
     return {
           'statusCode': 200,
           'headers': {'Content-Type': 'text/html'},

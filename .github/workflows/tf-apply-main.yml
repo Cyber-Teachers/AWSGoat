@@ -15,6 +15,10 @@ on:
         description: "Student/lab instance ID for multi-student deployment (e.g. student-01). Leave empty for single default deployment."
         required: false
         type: string
+      region:
+        description: "AWS region for deployment (e.g. eu-west-1). Leave empty to use AWS_REGION env or eu-west-3 (Paris)."
+        required: false
+        type: string
 
 permissions: write-all
 
@@ -26,7 +30,7 @@ jobs:
     env: 
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: "us-east-1"
+      AWS_REGION: "eu-west-3"
 
     defaults:
       run:
@@ -41,11 +45,13 @@ jobs:
       with:
         terraform_version: 1.10.5
 
-    - name: Set Account ID and Student ID
+    - name: Set Account ID, Student ID and Region
       id: account
       run: |
         echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
         echo "STUDENT_ID=${{ github.event.inputs.student_id || 'default' }}" >> $GITHUB_ENV
+        echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
+        aws configure set region ${{ env.AWS_REGION }}
 
     - name: Check previous AWSGoat Deployment (default only)
       id: check 
@@ -94,7 +100,10 @@ jobs:
       id: plan 
       run: | 
         cd modules/${{ github.event.inputs.module }}
-        terraform plan -input=false -var="student_id=${{ env.STUDENT_ID }}"
+        if [ "${{ env.STUDENT_ID }}" != "default" ]; then
+          terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
+        fi
+        terraform plan -input=false -var="student_id=${{ env.STUDENT_ID }}" -var="region=${{ env.AWS_REGION }}"
       continue-on-error: false
       
     - name: Terraform Plan Status
@@ -104,7 +113,10 @@ jobs:
     - name: Terraform Apply
       run: | 
         cd modules/${{ github.event.inputs.module }}
-        terraform apply -auto-approve -input=false -var="student_id=${{ env.STUDENT_ID }}"
+        if [ "${{ env.STUDENT_ID }}" != "default" ]; then
+          terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
+        fi
+        terraform apply -auto-approve -input=false -var="student_id=${{ env.STUDENT_ID }}" -var="region=${{ env.AWS_REGION }}"
       continue-on-error: false
 
     # Copy tfstate file to s3 bucket
@@ -113,10 +125,17 @@ jobs:
       run: |
         cd modules/${{ github.event.inputs.module }}
         if [ "${{ env.STUDENT_ID }}" = "default" ]; then
-          aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate
+          if [ -f ./terraform.tfstate ]; then
+            aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate
+          fi
         else
-          aws s3 cp .terraform.tfstate.d/${{ env.STUDENT_ID }}/terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ env.STUDENT_ID }}
-        fi 
+          STATE_FILE=".terraform.tfstate.d/${{ env.STUDENT_ID }}/terraform.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            aws s3 cp "$STATE_FILE" s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ env.STUDENT_ID }}
+          else
+            echo "State file $STATE_FILE not found (apply may have failed or workspace state not written); skipping upload."
+          fi
+        fi
 
     # Terraform Output the API Gateway url
     - name: Application URL

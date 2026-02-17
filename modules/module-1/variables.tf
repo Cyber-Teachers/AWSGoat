@@ -3,3 +3,9 @@ variable "student_id" {
   type        = string
   default     = "default"
 }
+
+variable "region" {
+  description = "AWS region for deployment. Can be set via TF_VAR_region (env) or -var. Defaults to eu-west-3 (Paris)."
+  type        = string
+  default     = "eu-west-3"
+}

@@ -1,0 +1,90 @@
+name: 'Terraform Destroy All'
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "AWS region (must match the one used for deploy). Leave empty to use AWS_REGION env or eu-west-3 (Paris)."
+        required: false
+        type: string
+
+permissions: write-all
+
+jobs:
+  destroy-all:
+    name: 'Destroy All Deployments'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: "eu-west-3"
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.10.5
+
+      - name: Set Account ID and Region
+        id: account
+        run: |
+          echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+          echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
+          aws configure set region ${{ env.AWS_REGION }}
+
+      - name: List state keys in S3
+        id: list-keys
+        run: |
+          BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
+          aws s3 ls "s3://${BUCKET}/" --output text | awk '{print $4}' | grep -E '^terraform\.tfstate($|\.)' > state_keys.txt || true
+          echo "State keys found:"
+          cat state_keys.txt || echo "(none)"
+
+      - name: Destroy all (module-1 and module-2, each student state)
+        run: |
+          BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
+          ROOT="$GITHUB_WORKSPACE"
+
+          if [ ! -s "$ROOT/state_keys.txt" ]; then
+            echo "No state keys found in S3; nothing to destroy."
+            exit 0
+          fi
+
+          for MODULE in module-1 module-2; do
+            echo "=== Initializing $MODULE ==="
+            cd "$ROOT/modules/$MODULE"
+            terraform init -input=false
+
+            while IFS= read -r key; do
+              [ -z "$key" ] && continue
+              if [ "$key" = "terraform.tfstate" ]; then
+                STUDENT_ID="default"
+              else
+                STUDENT_ID="${key#terraform.tfstate.}"
+              fi
+
+              echo "--- Destroying $MODULE student_id=$STUDENT_ID ---"
+              cd "$ROOT/modules/$MODULE"
+
+              if [ "$STUDENT_ID" = "default" ]; then
+                aws s3 cp "s3://${BUCKET}/terraform.tfstate" ./terraform.tfstate 2>/dev/null || true
+                terraform workspace select default 2>/dev/null || true
+              else
+                mkdir -p ".terraform.tfstate.d/$STUDENT_ID"
+                aws s3 cp "s3://${BUCKET}/terraform.tfstate.${STUDENT_ID}" ".terraform.tfstate.d/${STUDENT_ID}/terraform.tfstate" 2>/dev/null || true
+                terraform workspace select "$STUDENT_ID" 2>/dev/null || terraform workspace new "$STUDENT_ID"
+              fi
+
+              terraform destroy -auto-approve -input=false -var="student_id=${STUDENT_ID}" -var="region=${{ env.AWS_REGION }}" || true
+            done < "$ROOT/state_keys.txt"
+          done
+
+          echo "=== Destroy all completed ==="

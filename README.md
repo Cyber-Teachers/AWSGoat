@@ -78,7 +78,7 @@ AWS_SECRET_ACCESS_KEY
   <img src="https://user-images.githubusercontent.com/65826354/184551000-29f59b56-cbcc-4daf-9dad-a40e35bd6e02.png">
 </p>
 
-**Step 3.** From the repository actions tab, select the module to deploy and run the ``Terraform Apply`` Workflow.
+**Step 3.** From the repository actions tab, select the module to deploy and run the ``Terraform Apply`` Workflow. You can optionally set **Region** (e.g. `eu-west-1`) or rely on the `AWS_REGION` environment variable (default `eu-west-3`, Paris).
 
 <p align="center">
   <img src="https://user-images.githubusercontent.com/65826354/194799524-a814fba3-2936-47a3-bb11-9d65f65bbf60.png">
@@ -113,6 +113,11 @@ cd modules/module-<Number>
 terraform init
 terraform apply --auto-approve
 ```
+Optional: set the AWS region via environment variable (default is `eu-west-3`, Paris):
+```sh
+export TF_VAR_region=eu-west-1
+terraform apply --auto-approve
+```
 
 ### Multi-Student Deployment
 
@@ -140,6 +145,8 @@ You can deploy **multiple isolated lab instances** in the same AWS account (e.g.
   terraform apply -auto-approve -var="student_id=student-01"
   ```
 - Resource names are suffixed with the student ID (e.g. `AWS_GOAT_ROLE-student-01`, `blog_app_lambda_data-student-01`, `ecs-instance-role-student-01`, `ec2Deployer-role-student-01`). Attack manuals use the same steps; use the role/bucket names from your deployment (or the suffix shown in Terraform output).
+
+**Tag for cleanup:** All resources are tagged `Project = AWSGoat`. In the AWS console, filter by this tag to find or bulk-delete lab resources.
 
 # Modules
 

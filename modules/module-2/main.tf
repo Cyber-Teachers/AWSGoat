@@ -2,13 +2,19 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.27"
+      version = "~> 3.38"
     }
   }
 }
 
 provider "aws" {
-  region = "us-east-1"
+  region = var.region
+
+  default_tags {
+    tags = {
+      Project = "AWSGoat"
+    }
+  }
 }
 
 data "aws_caller_identity" "current" {}
@@ -142,7 +148,7 @@ resource "aws_db_instance" "database-instance" {
   password               = "T2kVB3zgeN3YbrKS"
   parameter_group_name   = "default.mysql8.0"
   skip_final_snapshot    = true
-  availability_zone      = "us-east-1a"
+  availability_zone      = data.aws_availability_zones.available.names[0]
   db_subnet_group_name   = aws_db_subnet_group.database-subnet-group.name
   vpc_security_group_ids = [aws_security_group.database-security-group.id]
 }
