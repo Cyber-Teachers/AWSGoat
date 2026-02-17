@@ -3209,7 +3209,7 @@ resource "aws_s3_bucket" "bucket_upload" {
   bucket        = "production-blog-awsgoat-bucket-${data.aws_caller_identity.current.account_id}${local.name_suffix}"
   force_destroy = true
   tags = {
-    Name        = "Production bucket"
+    Name        = "Production-bucket${local.name_suffix}"
     Environment = "Prod"
   }
 }
@@ -3295,7 +3295,7 @@ resource "aws_s3_bucket" "dev" {
   bucket = "dev-blog-awsgoat-bucket-${data.aws_caller_identity.current.account_id}${local.name_suffix}"
 
   tags = {
-    Name        = "Development bucket"
+    Name        = "Development-bucket${local.name_suffix}"
     Environment = "Dev"
   }
 }
@@ -3376,7 +3376,7 @@ resource "aws_s3_bucket" "bucket_temp" {
   force_destroy = true
 
   tags = {
-    Name        = "Temporary bucket"
+    Name        = "Temporary-bucket${local.name_suffix}"
     Environment = "Dev"
   }
 }
@@ -3448,13 +3448,13 @@ resource "aws_vpc" "goat_vpc" {
   instance_tenancy     = "default"
   enable_dns_hostnames = true
   tags = {
-    Name = "AWS_GOAT_VPC"
+    Name = "AWS_GOAT_VPC${local.name_suffix}"
   }
 }
 resource "aws_internet_gateway" "goat_gw" {
   vpc_id = aws_vpc.goat_vpc.id
   tags = {
-    Name = "app gateway"
+    Name = "app-gateway${local.name_suffix}"
   }
 }
 resource "aws_subnet" "goat_subnet" {
@@ -3463,7 +3463,7 @@ resource "aws_subnet" "goat_subnet" {
   availability_zone       = data.aws_availability_zones.available.names[0]
   map_public_ip_on_launch = true
   tags = {
-    Name = "AWS_GOAT App subnet"
+    Name = "AWS_GOAT-App-subnet${local.name_suffix}"
   }
 }
 

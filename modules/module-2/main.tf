@@ -33,7 +33,7 @@ resource "aws_vpc" "lab-vpc" {
   enable_dns_support   = true
   enable_dns_hostnames = true
   tags = {
-    Name = "AWS_GOAT_VPC"
+    Name = "AWS_GOAT_VPC${local.name_suffix}"
   }
 }
 resource "aws_subnet" "lab-subnet-public-1" {
@@ -45,7 +45,7 @@ resource "aws_subnet" "lab-subnet-public-1" {
 resource "aws_internet_gateway" "my_vpc_igw" {
   vpc_id = aws_vpc.lab-vpc.id
   tags = {
-    Name = "My VPC - Internet Gateway"
+    Name = "My-VPC-IGW${local.name_suffix}"
   }
 }
 resource "aws_route_table" "my_vpc_us_east_1_public_rt" {
@@ -56,7 +56,7 @@ resource "aws_route_table" "my_vpc_us_east_1_public_rt" {
   }
 
   tags = {
-    Name = "Public Subnet Route Table."
+    Name = "Public-Subnet-RT${local.name_suffix}"
   }
 }
 
@@ -131,7 +131,7 @@ resource "aws_security_group" "database-security-group" {
   }
 
   tags = {
-    Name = "rds-db-sg"
+    Name = "rds-db-sg${local.name_suffix}"
   }
 
 }
@@ -174,7 +174,7 @@ resource "aws_security_group" "load_balancer_security_group" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
-    Name = "aws-goat-m2-sg"
+    Name = "aws-goat-m2-sg${local.name_suffix}"
   }
 }
 
@@ -358,7 +358,7 @@ data "aws_ami" "ecs_optimized_ami" {
 
 
 resource "aws_launch_template" "ecs_launch_template" {
-  name_prefix   = "ecs-launch-template-"
+  name_prefix   = "ecs-launch-template-${local.name_suffix}-"
   image_id      = data.aws_ami.ecs_optimized_ami.id
   instance_type = "t3.micro"
 
@@ -448,7 +448,7 @@ resource "aws_alb" "application_load_balancer" {
   security_groups    = [aws_security_group.load_balancer_security_group.id]
 
   tags = {
-    Name = "aws-goat-m2-alb"
+    Name = "aws-goat-m2-alb${local.name_suffix}"
   }
 }
 
@@ -460,7 +460,7 @@ resource "aws_lb_target_group" "target_group" {
   vpc_id      = aws_vpc.lab-vpc.id
 
   tags = {
-    Name = "aws-goat-m2-tg"
+    Name = "aws-goat-m2-tg${local.name_suffix}"
   }
 }
 
