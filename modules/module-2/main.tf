@@ -98,12 +98,12 @@ resource "aws_security_group" "ecs_sg" {
 # Create Database Subnet Group
 # terraform aws db subnet group
 resource "aws_db_subnet_group" "database-subnet-group" {
-  name        = "database subnets"
+  name        = "database-subnets${local.name_suffix}"
   subnet_ids  = [aws_subnet.lab-subnet-public-1.id, aws_subnet.lab-subnet-public-1b.id]
   description = "Subnets for Database Instance"
 
   tags = {
-    Name = "Database Subnets"
+    Name = "Database Subnets${local.name_suffix}"
   }
 }
 
@@ -111,7 +111,7 @@ resource "aws_db_subnet_group" "database-subnet-group" {
 # terraform aws create security group
 
 resource "aws_security_group" "database-security-group" {
-  name        = "Database Security Group"
+  name        = "Database-Security-Group${local.name_suffix}"
   description = "Enable MYSQL Aurora access on Port 3306"
   vpc_id      = aws_vpc.lab-vpc.id
 
@@ -139,7 +139,7 @@ resource "aws_security_group" "database-security-group" {
 # Create Database Instance Restored from DB Snapshots
 # terraform aws db instance
 resource "aws_db_instance" "database-instance" {
-  identifier             = "aws-goat-db"
+  identifier             = "aws-goat-db${local.name_suffix}"
   allocated_storage      = 10
   instance_class         = "db.t3.micro"
   engine                 = "mysql"
@@ -156,7 +156,7 @@ resource "aws_db_instance" "database-instance" {
 
 
 resource "aws_security_group" "load_balancer_security_group" {
-  name        = "Load-Balancer-SG"
+  name        = "Load-Balancer-SG${local.name_suffix}"
   description = "SG for load balancer created from terraform"
   vpc_id      = aws_vpc.lab-vpc.id
 
@@ -477,7 +477,7 @@ resource "aws_lb_listener" "listener" {
 
 
 resource "aws_secretsmanager_secret" "rds_creds" {
-  name                    = "RDS_CREDS"
+  name                    = "RDS_CREDS${local.name_suffix}"
   recovery_window_in_days = 0
 }
 

@@ -3085,7 +3085,7 @@ data "archive_file" "lambda_zip_bap" {
 }
 resource "aws_lambda_layer_version" "lambda_layer" {
   filename                 = "resources/lambda/layer/bcrypt-pyjwt.zip"
-  layer_name               = "bcrypt-pyjwt"
+  layer_name               = "bcrypt-pyjwt${local.name_suffix}"
   compatible_architectures = ["x86_64"]
   compatible_runtimes      = ["python3.9"]
 }
@@ -3480,8 +3480,8 @@ resource "aws_route_table_association" "goat_public_rta" {
 }
 
 resource "aws_security_group" "goat_sg" {
-  name        = "AWS_GOAT_sg"
-  description = "AWS_GOAT_sg"
+  name        = "AWS_GOAT_sg${local.name_suffix}"
+  description = "AWS_GOAT_sg${local.name_suffix}"
   vpc_id      = aws_vpc.goat_vpc.id
   ingress {
     from_port   = 22
