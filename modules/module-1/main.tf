@@ -36,6 +36,7 @@ resource "aws_lambda_function" "react_lambda_app" {
   handler       = "index.handler"
   runtime       = "nodejs18.x"
   role          = aws_iam_role.blog_app_lambda.arn
+  tags          = local.common_tags
   depends_on    = [data.archive_file.lambda_zip, null_resource.file_replacement_lambda_react]
 }
 
@@ -44,6 +45,7 @@ resource "aws_lambda_function" "react_lambda_app" {
 
 resource "aws_iam_role" "blog_app_lambda" {
   name = "blog_app_lambda${local.name_suffix}"
+  tags = local.common_tags
 
   assume_role_policy = <<EOF
 {
@@ -74,7 +76,8 @@ resource "aws_iam_role_policy_attachment" "ba_lambda_attach_3" {
 
 
 resource "aws_api_gateway_rest_api" "api" {
-  name = "blog-application${local.name_suffix}"
+  name   = "blog-application${local.name_suffix}"
+  tags   = local.common_tags
   endpoint_configuration {
     types = [
       "REGIONAL"
@@ -182,6 +185,7 @@ resource "aws_api_gateway_stage" "api" {
 resource "aws_api_gateway_rest_api" "apiLambda_ba" {
   name           = "blog-application-api${local.name_suffix}"
   api_key_source = "HEADER"
+  tags           = local.common_tags
   endpoint_configuration {
     types = [
       "REGIONAL"
@@ -3088,6 +3092,7 @@ resource "aws_lambda_layer_version" "lambda_layer" {
   layer_name               = "bcrypt-pyjwt${local.name_suffix}"
   compatible_architectures = ["x86_64"]
   compatible_runtimes      = ["python3.9"]
+  tags                     = local.common_tags
 }
 
 resource "aws_lambda_function" "lambda_ba_data" {
@@ -3096,6 +3101,7 @@ resource "aws_lambda_function" "lambda_ba_data" {
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.blog_app_lambda_python.arn
+  tags          = local.common_tags
   depends_on    = [data.archive_file.lambda_zip_bap]
   layers        = [aws_lambda_layer_version.lambda_layer.arn]
   memory_size   = "256"
@@ -3113,6 +3119,7 @@ resource "aws_lambda_function" "lambda_ba_data" {
 
 resource "aws_iam_role" "blog_app_lambda_python" {
   name = "blog_app_lambda_data${local.name_suffix}"
+  tags = local.common_tags
 
   assume_role_policy = <<EOF
 {
@@ -3138,7 +3145,8 @@ resource "aws_iam_role_policy_attachment" "blog_app_policy" {
 }
 
 resource "aws_iam_policy" "lambda_data_policies" {
-  name = "lambda-data-policies${local.name_suffix}"
+  name   = "lambda-data-policies${local.name_suffix}"
+  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -3189,6 +3197,7 @@ resource "aws_lambda_permission" "apigw_ba_python" {
 locals {
   # Suffix for multi-student deployment. S3 allows [a-z0-9.-]; IAM allows alphanumeric and +=,.@-
   name_suffix = var.student_id == "default" ? "" : "-${lower(replace(var.student_id, "_", "-"))}"
+  common_tags = { Project = "AWSGoat" }
   content_type_map = {
     html = "text/html",
     js   = "application/javascript",
@@ -3208,10 +3217,10 @@ locals {
 resource "aws_s3_bucket" "bucket_upload" {
   bucket        = "production-blog-awsgoat-bucket-${data.aws_caller_identity.current.account_id}${local.name_suffix}"
   force_destroy = true
-  tags = {
+  tags = merge(local.common_tags, {
     Name        = "Production-bucket${local.name_suffix}"
     Environment = "Prod"
-  }
+  })
 }
 
 # ACL fixes required for AWS S3 APR 2023 updates.
@@ -3294,10 +3303,10 @@ resource "aws_s3_object" "upload_folder_prod" {
 resource "aws_s3_bucket" "dev" {
   bucket = "dev-blog-awsgoat-bucket-${data.aws_caller_identity.current.account_id}${local.name_suffix}"
 
-  tags = {
+  tags = merge(local.common_tags, {
     Name        = "Development-bucket${local.name_suffix}"
     Environment = "Dev"
-  }
+  })
 }
 
 
@@ -3375,10 +3384,10 @@ resource "aws_s3_bucket" "bucket_temp" {
   bucket        = "ec2-temp-bucket-${data.aws_caller_identity.current.account_id}${local.name_suffix}"
   force_destroy = true
 
-  tags = {
+  tags = merge(local.common_tags, {
     Name        = "Temporary-bucket${local.name_suffix}"
     Environment = "Dev"
-  }
+  })
 }
 
 # ACL fixes required for AWS S3 APR 2023 updates.
@@ -3434,10 +3443,10 @@ resource "aws_s3_bucket" "bucket_tf_files" {
   count         = var.student_id == "default" ? 1 : 0
   bucket        = "do-not-delete-awsgoat-state-files-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-  tags = {
+  tags = merge(local.common_tags, {
     Name        = "Do not delete Bucket"
     Environment = "Dev"
-  }
+  })
 }
 
 
@@ -3447,24 +3456,24 @@ resource "aws_vpc" "goat_vpc" {
   cidr_block           = "192.168.0.0/16"
   instance_tenancy     = "default"
   enable_dns_hostnames = true
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "AWS_GOAT_VPC${local.name_suffix}"
-  }
+  })
 }
 resource "aws_internet_gateway" "goat_gw" {
   vpc_id = aws_vpc.goat_vpc.id
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "app-gateway${local.name_suffix}"
-  }
+  })
 }
 resource "aws_subnet" "goat_subnet" {
   vpc_id                  = aws_vpc.goat_vpc.id
   cidr_block              = "192.168.0.0/24"
   availability_zone       = data.aws_availability_zones.available.names[0]
   map_public_ip_on_launch = true
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "AWS_GOAT-App-subnet${local.name_suffix}"
-  }
+  })
 }
 
 resource "aws_route_table" "goat_rt" {
@@ -3496,9 +3505,9 @@ resource "aws_security_group" "goat_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "AWS_GOAT_sg${local.name_suffix}"
-  }
+  })
 }
 
 
@@ -3510,6 +3519,7 @@ resource "aws_iam_instance_profile" "goat_iam_profile" {
 resource "aws_iam_role" "goat_role" {
   name               = "AWS_GOAT_ROLE${local.name_suffix}"
   path               = "/"
+  tags               = local.common_tags
   assume_role_policy = <<EOF
 {
     "Version": "2012-10-17",
@@ -3538,7 +3548,8 @@ resource "aws_iam_role_policy_attachment" "goat_policy" {
 }
 
 resource "aws_iam_policy" "goat_inline_policy_2" {
-  name = "dev-ec2-lambda-policies${local.name_suffix}"
+  name   = "dev-ec2-lambda-policies${local.name_suffix}"
+  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -3617,9 +3628,9 @@ resource "aws_instance" "goat_instance" {
   iam_instance_profile = aws_iam_instance_profile.goat_iam_profile.name
   subnet_id            = aws_subnet.goat_subnet.id
   security_groups      = [aws_security_group.goat_sg.id]
-  tags = {
+  tags = merge(local.common_tags, {
     Name = "AWS_GOAT_DEV_INSTANCE${local.name_suffix}"
-  }
+  })
   user_data = data.template_file.goat_script.rendered
   depends_on = [
     aws_s3_object.upload_temp_object_2
@@ -3632,6 +3643,7 @@ resource "aws_dynamodb_table" "users_table" {
   billing_mode   = "PROVISIONED"
   read_capacity  = 2
   write_capacity = 2
+  tags           = local.common_tags
 
   hash_key = "email"
   attribute {
@@ -3644,6 +3656,7 @@ resource "aws_dynamodb_table" "posts_table" {
   billing_mode   = "PROVISIONED"
   read_capacity  = 2
   write_capacity = 2
+  tags           = local.common_tags
 
   hash_key = "id"
   attribute {
