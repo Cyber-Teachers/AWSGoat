@@ -3092,7 +3092,6 @@ resource "aws_lambda_layer_version" "lambda_layer" {
   layer_name               = "bcrypt-pyjwt${local.name_suffix}"
   compatible_architectures = ["x86_64"]
   compatible_runtimes      = ["python3.9"]
-  tags                     = local.common_tags
 }
 
 resource "aws_lambda_function" "lambda_ba_data" {
