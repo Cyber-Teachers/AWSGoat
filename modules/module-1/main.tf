@@ -682,7 +682,7 @@ resource "aws_api_gateway_integration_response" "lambda_dump_root_post_integrati
   rest_api_id = aws_api_gateway_rest_api.apiLambda_ba.id
   resource_id = aws_api_gateway_resource.dump_root.id
   http_method = aws_api_gateway_method.proxy_dump_root_get.http_method
-  status_code = aws_api_gateway_method_response.dump_root_options_response_200.status_code
+  status_code = aws_api_gateway_method_response.proxy_dump_root_get_response_200.status_code
 
 
   response_parameters = {
