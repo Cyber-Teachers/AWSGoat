@@ -95,6 +95,12 @@ jobs:
           aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ matrix.student_id }} .terraform.tfstate.d/${{ matrix.student_id }}/terraform.tfstate 2>/dev/null || true
         continue-on-error: true
 
+      - name: Import existing resources (recover from partial apply)
+        run: |
+          chmod +x scripts/import-existing-resources.sh
+          ACCOUNT_ID=${{ env.ACCOUNT_ID }} AWS_REGION=${{ env.AWS_REGION }} ./scripts/import-existing-resources.sh ${{ github.event.inputs.module }} ${{ matrix.student_id }}
+        continue-on-error: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: 3
