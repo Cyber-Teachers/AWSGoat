@@ -20,66 +20,98 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  name_suffix  = var.student_id == "default" ? "" : "-${lower(replace(var.student_id, "_", "-"))}"
-  common_tags  = { Project = "AWSGoat" }
+  name_suffix   = var.student_id == "default" ? "" : "-${lower(replace(var.student_id, "_", "-"))}"
+  common_tags   = { Project = "AWSGoat" }
+  # Subnet index in shared VPC: default=0, 01=1, 02=2, ... (avoids overlapping CIDRs)
+  subnet_index  = var.student_id == "default" ? 0 : (try(tonumber(var.student_id), 1) or 1)
+  vpc_id        = var.student_id == "default" ? aws_vpc.lab-vpc[0].id : data.aws_vpc.shared[0].id
+  route_table_id = var.student_id == "default" ? aws_route_table.my_vpc_us_east_1_public_rt[0].id : data.aws_route_table.shared[0].id
 }
 
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# VPC Config for public access
+# Shared VPC: created only for student_id "default" to avoid VpcLimitExceeded when deploying many students.
+# Other students use this VPC (deploy default first, then 01, 02, ...).
+data "aws_vpc" "shared" {
+  count = var.student_id != "default" ? 1 : 0
+
+  filter {
+    name   = "tag:Name"
+    values = ["AWS_GOAT_VPC"]
+  }
+  filter {
+    name   = "tag:Project"
+    values = ["AWSGoat"]
+  }
+}
+
+data "aws_route_table" "shared" {
+  count = var.student_id != "default" ? 1 : 0
+
+  vpc_id = data.aws_vpc.shared[0].id
+  filter {
+    name   = "tag:Name"
+    values = ["Public-Subnet-RT"]
+  }
+}
+
+# VPC Config for public access (only default creates the VPC)
 resource "aws_vpc" "lab-vpc" {
+  count                = var.student_id == "default" ? 1 : 0
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
   tags = merge(local.common_tags, {
-    Name = "AWS_GOAT_VPC${local.name_suffix}"
+    Name = "AWS_GOAT_VPC"
   })
 }
 resource "aws_subnet" "lab-subnet-public-1" {
-  vpc_id                  = aws_vpc.lab-vpc.id
-  cidr_block              = "10.0.1.0/24"
+  vpc_id                  = local.vpc_id
+  cidr_block              = "10.0.${1 + local.subnet_index}.0/24"
   map_public_ip_on_launch = true
   availability_zone       = data.aws_availability_zones.available.names[0]
 }
 resource "aws_internet_gateway" "my_vpc_igw" {
-  vpc_id = aws_vpc.lab-vpc.id
+  count  = var.student_id == "default" ? 1 : 0
+  vpc_id = aws_vpc.lab-vpc[0].id
   tags = merge(local.common_tags, {
-    Name = "My-VPC-IGW${local.name_suffix}"
+    Name = "My-VPC-IGW"
   })
 }
 resource "aws_route_table" "my_vpc_us_east_1_public_rt" {
-  vpc_id = aws_vpc.lab-vpc.id
+  count  = var.student_id == "default" ? 1 : 0
+  vpc_id = aws_vpc.lab-vpc[0].id
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.my_vpc_igw.id
+    gateway_id = aws_internet_gateway.my_vpc_igw[0].id
   }
 
   tags = merge(local.common_tags, {
-    Name = "Public-Subnet-RT${local.name_suffix}"
+    Name = "Public-Subnet-RT"
   })
 }
 
 resource "aws_route_table_association" "my_vpc_us_east_1a_public" {
   subnet_id      = aws_subnet.lab-subnet-public-1.id
-  route_table_id = aws_route_table.my_vpc_us_east_1_public_rt.id
+  route_table_id = local.route_table_id
 }
 resource "aws_subnet" "lab-subnet-public-1b" {
-  vpc_id                  = aws_vpc.lab-vpc.id
-  cidr_block              = "10.0.128.0/24"
+  vpc_id                  = local.vpc_id
+  cidr_block              = "10.0.${128 + local.subnet_index}.0/24"
   availability_zone       = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
 }
 resource "aws_route_table_association" "my_vpc_us_east_1b_public" {
   subnet_id      = aws_subnet.lab-subnet-public-1b.id
-  route_table_id = aws_route_table.my_vpc_us_east_1_public_rt.id
+  route_table_id = local.route_table_id
 }
 
 resource "aws_security_group" "ecs_sg" {
   name        = "ECS-SG${local.name_suffix}"
   description = "SG for cluster created from terraform"
-  vpc_id      = aws_vpc.lab-vpc.id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port       = 0
@@ -114,7 +146,7 @@ resource "aws_db_subnet_group" "database-subnet-group" {
 resource "aws_security_group" "database-security-group" {
   name        = "Database-Security-Group${local.name_suffix}"
   description = "Enable MYSQL Aurora access on Port 3306"
-  vpc_id      = aws_vpc.lab-vpc.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description     = "MYSQL/Aurora Access"
@@ -159,7 +191,7 @@ resource "aws_db_instance" "database-instance" {
 resource "aws_security_group" "load_balancer_security_group" {
   name        = "Load-Balancer-SG${local.name_suffix}"
   description = "SG for load balancer created from terraform"
-  vpc_id      = aws_vpc.lab-vpc.id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port   = 80
@@ -464,7 +496,7 @@ resource "aws_lb_target_group" "target_group" {
   port        = 80
   protocol    = "HTTP"
   target_type = "instance"
-  vpc_id      = aws_vpc.lab-vpc.id
+  vpc_id      = local.vpc_id
 
   tags = merge(local.common_tags, {
     Name = "aws-goat-m2-tg${local.name_suffix}"

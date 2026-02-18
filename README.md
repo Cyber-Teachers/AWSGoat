@@ -126,7 +126,7 @@ You can deploy **multiple isolated lab instances** in the same AWS account (e.g.
 **GitHub Actions**
 
 - When running **Terraform Apply**, optionally set **Student ID** (e.g. `student-01`, `student-02`). Leave empty for a single default deployment.
-- **Terraform Apply (Bulk)** launches multiple lab instances in one run: set **Number of instances** (e.g. 5) and **Module**; student IDs 01, 02, … are used automatically. Runs up to 5 applies in parallel.
+- **Terraform Apply (Bulk)** launches multiple lab instances in one run: set **Number of instances** (e.g. 5) and **Module**; student IDs 01, 02, … are used automatically. A **bootstrap** job runs first with `student_id=default` to create a shared VPC (avoids `VpcLimitExceeded`); then each instance runs in parallel (up to 5 at a time).
 - When running **Terraform Destroy**, use the same **Student ID** you used for that deployment.
 - State is stored per student: `terraform.tfstate` (default) or `terraform.tfstate.<student_id>`.
 

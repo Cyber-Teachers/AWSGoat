@@ -3188,8 +3188,11 @@ resource "aws_lambda_permission" "apigw_ba_python" {
 
 locals {
   # Suffix for multi-student deployment. S3 allows [a-z0-9.-]; IAM allows alphanumeric and +=,.@-
-  name_suffix = var.student_id == "default" ? "" : "-${lower(replace(var.student_id, "_", "-"))}"
-  common_tags = { Project = "AWSGoat" }
+  name_suffix   = var.student_id == "default" ? "" : "-${lower(replace(var.student_id, "_", "-"))}"
+  common_tags   = { Project = "AWSGoat" }
+  subnet_index  = var.student_id == "default" ? 0 : (try(tonumber(var.student_id), 1) or 1)
+  vpc_id        = var.student_id == "default" ? aws_vpc.goat_vpc[0].id : data.aws_vpc.shared[0].id
+  route_table_id = var.student_id == "default" ? aws_route_table.goat_rt[0].id : data.aws_route_table.shared[0].id
   content_type_map = {
     html = "text/html",
     js   = "application/javascript",
@@ -3442,25 +3445,50 @@ resource "aws_s3_bucket" "bucket_tf_files" {
 }
 
 
-# VPC to deploy web app
+# Shared VPC: created only for student_id "default" to avoid VpcLimitExceeded when deploying many students.
+data "aws_vpc" "shared" {
+  count = var.student_id != "default" ? 1 : 0
 
+  filter {
+    name   = "tag:Name"
+    values = ["AWS_GOAT_VPC"]
+  }
+  filter {
+    name   = "tag:Project"
+    values = ["AWSGoat"]
+  }
+}
+
+data "aws_route_table" "shared" {
+  count = var.student_id != "default" ? 1 : 0
+
+  vpc_id = data.aws_vpc.shared[0].id
+  filter {
+    name   = "tag:Name"
+    values = ["AWS_GOAT_rt"]
+  }
+}
+
+# VPC to deploy web app (only default creates the VPC)
 resource "aws_vpc" "goat_vpc" {
+  count                = var.student_id == "default" ? 1 : 0
   cidr_block           = "192.168.0.0/16"
   instance_tenancy     = "default"
   enable_dns_hostnames = true
   tags = merge(local.common_tags, {
-    Name = "AWS_GOAT_VPC${local.name_suffix}"
+    Name = "AWS_GOAT_VPC"
   })
 }
 resource "aws_internet_gateway" "goat_gw" {
-  vpc_id = aws_vpc.goat_vpc.id
+  count  = var.student_id == "default" ? 1 : 0
+  vpc_id = aws_vpc.goat_vpc[0].id
   tags = merge(local.common_tags, {
-    Name = "app-gateway${local.name_suffix}"
+    Name = "app-gateway"
   })
 }
 resource "aws_subnet" "goat_subnet" {
-  vpc_id                  = aws_vpc.goat_vpc.id
-  cidr_block              = "192.168.0.0/24"
+  vpc_id                  = local.vpc_id
+  cidr_block              = "192.168.${local.subnet_index}.0/24"
   availability_zone       = data.aws_availability_zones.available.names[0]
   map_public_ip_on_launch = true
   tags = merge(local.common_tags, {
@@ -3469,21 +3497,25 @@ resource "aws_subnet" "goat_subnet" {
 }
 
 resource "aws_route_table" "goat_rt" {
-  vpc_id = aws_vpc.goat_vpc.id
+  count  = var.student_id == "default" ? 1 : 0
+  vpc_id = aws_vpc.goat_vpc[0].id
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.goat_gw.id
+    gateway_id = aws_internet_gateway.goat_gw[0].id
   }
+  tags = merge(local.common_tags, {
+    Name = "AWS_GOAT_rt"
+  })
 }
 resource "aws_route_table_association" "goat_public_rta" {
   subnet_id      = aws_subnet.goat_subnet.id
-  route_table_id = aws_route_table.goat_rt.id
+  route_table_id = local.route_table_id
 }
 
 resource "aws_security_group" "goat_sg" {
   name        = "AWS_GOAT_sg${local.name_suffix}"
   description = "AWS_GOAT_sg${local.name_suffix}"
-  vpc_id      = aws_vpc.goat_vpc.id
+  vpc_id      = local.vpc_id
   ingress {
     from_port   = 22
     to_port     = 22
