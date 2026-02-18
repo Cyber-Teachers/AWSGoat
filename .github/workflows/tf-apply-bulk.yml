@@ -43,61 +43,9 @@ jobs:
           echo "student_ids=$arr" >> $GITHUB_OUTPUT
           echo "Generated: $arr"
 
-  # Create shared VPC (and state bucket) so matrix jobs 01, 02, ... can use it and avoid VpcLimitExceeded
-  bootstrap-vpc:
-    name: 'Bootstrap shared VPC (default)'
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: "eu-west-3"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set Account ID and Region
-        run: |
-          echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
-          echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
-          aws configure set region ${{ env.AWS_REGION }}
-      - name: Ensure state bucket exists
-        run: |
-          aws s3 mb "s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}" 2>/dev/null || true
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.10.5
-      - name: Terraform Init
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          terraform init
-      - name: Terraform Workspace (default)
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          terraform workspace select default 2>/dev/null || terraform workspace new default
-      - name: Restore state (default)
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          mkdir -p .terraform.tfstate.d/default
-          aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.default .terraform.tfstate.d/default/terraform.tfstate 2>/dev/null || true
-        continue-on-error: true
-      - name: Terraform Apply (default – shared VPC)
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          terraform workspace select default
-          terraform apply -auto-approve -input=false -var="student_id=default" -var="region=${{ env.AWS_REGION }}"
-      - name: Copy state to S3 (default)
-        if: always()
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          STATE_FILE=".terraform.tfstate.d/default/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            aws s3 cp "$STATE_FILE" "s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.default"
-          fi
-
   terraform:
     name: 'Apply (${{ matrix.student_id }})'
-    needs: [generate-ids, bootstrap-vpc]
+    needs: generate-ids
     runs-on: ubuntu-latest
     environment: production
     strategy:
