@@ -23,7 +23,7 @@
         },
         "cpu": 0,
         "image": "public.ecr.aws/p3q0v3y2/aws-goat-m2:latest",
-        "name": "aws-goat-m2",
+        "name": "aws-goat-m2${name_suffix}",
         "mountPoints": [
             {
                 "sourceVolume": "modules",
