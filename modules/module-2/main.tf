@@ -42,7 +42,6 @@ resource "aws_subnet" "lab-subnet-public-1" {
   cidr_block              = "10.0.1.0/24"
   map_public_ip_on_launch = true
   availability_zone       = data.aws_availability_zones.available.names[0]
-  tags                    = local.common_tags
 }
 resource "aws_internet_gateway" "my_vpc_igw" {
   vpc_id = aws_vpc.lab-vpc.id
@@ -71,7 +70,6 @@ resource "aws_subnet" "lab-subnet-public-1b" {
   cidr_block              = "10.0.128.0/24"
   availability_zone       = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
-  tags                    = local.common_tags
 }
 resource "aws_route_table_association" "my_vpc_us_east_1b_public" {
   subnet_id      = aws_subnet.lab-subnet-public-1b.id
@@ -82,7 +80,6 @@ resource "aws_security_group" "ecs_sg" {
   name        = "ECS-SG${local.name_suffix}"
   description = "SG for cluster created from terraform"
   vpc_id      = aws_vpc.lab-vpc.id
-  tags        = local.common_tags
 
   ingress {
     from_port       = 0
@@ -155,7 +152,6 @@ resource "aws_db_instance" "database-instance" {
   availability_zone      = data.aws_availability_zones.available.names[0]
   db_subnet_group_name   = aws_db_subnet_group.database-subnet-group.name
   vpc_security_group_ids = [aws_security_group.database-security-group.id]
-  tags                   = local.common_tags
 }
 
 
@@ -188,7 +184,6 @@ resource "aws_security_group" "load_balancer_security_group" {
 resource "aws_iam_role" "ecs-instance-role" {
   name                 = "ecs-instance-role${local.name_suffix}"
   path                 = "/"
-  tags                 = local.common_tags
   permissions_boundary = aws_iam_policy.instance_boundary_policy.arn
   assume_role_policy = jsonencode({
     "Version" : "2008-10-17",
@@ -222,7 +217,6 @@ resource "aws_iam_role_policy_attachment" "ecs-instance-role-attachment-3" {
 
 resource "aws_iam_policy" "ecs_instance_policy" {
   name   = "aws-goat-instance-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -243,7 +237,6 @@ resource "aws_iam_policy" "ecs_instance_policy" {
 
 resource "aws_iam_policy" "instance_boundary_policy" {
   name   = "aws-goat-instance-boundary-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -278,7 +271,6 @@ resource "aws_iam_instance_profile" "ec2-deployer-profile" {
 resource "aws_iam_role" "ec2-deployer-role" {
   name               = "ec2Deployer-role${local.name_suffix}"
   path               = "/"
-  tags               = local.common_tags
   assume_role_policy = jsonencode({
     "Version" : "2008-10-17",
     "Statement" : [
@@ -296,7 +288,6 @@ resource "aws_iam_role" "ec2-deployer-role" {
 
 resource "aws_iam_policy" "ec2_deployer_admin_policy" {
   name   = "ec2DeployerAdmin-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -325,7 +316,6 @@ resource "aws_iam_instance_profile" "ecs-instance-profile" {
 resource "aws_iam_role" "ecs-task-role" {
   name               = "ecs-task-role${local.name_suffix}"
   path               = "/"
-  tags               = local.common_tags
   assume_role_policy = jsonencode({
     "Version" : "2012-10-17",
     "Statement" : [
@@ -372,7 +362,6 @@ resource "aws_launch_template" "ecs_launch_template" {
   name_prefix   = "ecs-launch-template-${local.name_suffix}-"
   image_id      = data.aws_ami.ecs_optimized_ami.id
   instance_type = "t3.micro"
-  tags          = local.common_tags
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs-instance-profile.name
@@ -380,11 +369,6 @@ resource "aws_launch_template" "ecs_launch_template" {
 
   vpc_security_group_ids = [aws_security_group.ecs_sg.id]
   user_data              = base64encode(data.template_file.user_data.rendered)
-
-  tag_specifications {
-    resource_type = "instance"
-    tags          = local.common_tags
-  }
 }
 
 resource "aws_autoscaling_group" "ecs_asg" {
@@ -502,7 +486,6 @@ resource "aws_lb_listener" "listener" {
 resource "aws_secretsmanager_secret" "rds_creds" {
   name                    = "RDS_CREDS${local.name_suffix}"
   recovery_window_in_days = 0
-  tags                    = local.common_tags
 }
 
 resource "aws_secretsmanager_secret_version" "secret_version" {
