@@ -43,9 +43,42 @@ jobs:
           echo "student_ids=$arr" >> $GITHUB_OUTPUT
           echo "Generated: $arr"
 
+  bootstrap:
+    name: 'Ensure state bucket exists'
+    needs: generate-ids
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: "eu-west-3"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.10.5
+      - name: Set Account ID and Region
+        run: |
+          echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+          echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
+          aws configure set region ${{ env.AWS_REGION }}
+      - name: Create state bucket if missing
+        run: |
+          BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "State bucket already exists: $BUCKET"
+          else
+            cd backend-bootstrap
+            terraform init -input=false
+            terraform apply -auto-approve -input=false -var="region=${{ env.AWS_REGION }}"
+            echo "State bucket created: $BUCKET"
+          fi
+
   terraform:
     name: 'Apply (${{ matrix.student_id }})'
-    needs: generate-ids
+    needs: [generate-ids, bootstrap]
     runs-on: ubuntu-latest
     environment: production
     strategy:
@@ -78,24 +111,21 @@ jobs:
           echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
           aws configure set region ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
+      - name: Terraform Init (S3 backend)
         run: |
           cd modules/${{ github.event.inputs.module }}
-          terraform init
+          terraform init -reconfigure -input=false \
+            -backend-config="bucket=do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="workspace_key_prefix=${{ github.event.inputs.module }}"
 
       - name: Terraform Workspace
         run: |
           cd modules/${{ github.event.inputs.module }}
           terraform workspace select ${{ matrix.student_id }} 2>/dev/null || terraform workspace new ${{ matrix.student_id }}
 
-      - name: Restore state
-        run: |
-          cd modules/${{ github.event.inputs.module }}
-          mkdir -p .terraform.tfstate.d/${{ matrix.student_id }}
-          aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ matrix.student_id }} .terraform.tfstate.d/${{ matrix.student_id }}/terraform.tfstate 2>/dev/null || true
-        continue-on-error: true
-
-      - name: Import existing resources (recover from partial apply)
+      - name: Import existing resources (once, before plan)
         run: |
           chmod +x scripts/import-existing-resources.sh
           ACCOUNT_ID=${{ env.ACCOUNT_ID }} AWS_REGION=${{ env.AWS_REGION }} ./scripts/import-existing-resources.sh ${{ github.event.inputs.module }} ${{ matrix.student_id }}
@@ -116,32 +146,14 @@ jobs:
 
       - name: Terraform Apply
         run: |
-          chmod +x scripts/import-existing-resources.sh
-          ACCOUNT_ID=${{ env.ACCOUNT_ID }} AWS_REGION=${{ env.AWS_REGION }} ./scripts/import-existing-resources.sh ${{ github.event.inputs.module }} ${{ matrix.student_id }} || true
           cd modules/${{ github.event.inputs.module }}
           terraform workspace select ${{ matrix.student_id }} 2>/dev/null || terraform workspace new ${{ matrix.student_id }}
-          APPLY_EXIT=0
-          terraform apply -auto-approve -input=false -var="student_id=${{ matrix.student_id }}" -var="region=${{ env.AWS_REGION }}" || APPLY_EXIT=$?
-          BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
-          aws s3 mb "s3://${BUCKET}" 2>/dev/null || true
-          STATE_OUT="terraform.tfstate.${{ matrix.student_id }}"
-          terraform state pull > "$STATE_OUT" 2>/dev/null && aws s3 cp "$STATE_OUT" "s3://${BUCKET}/$STATE_OUT" && echo "State saved to S3 (terraform state pull)." || echo "State upload skipped (state pull or upload failed)."
-          rm -f "$STATE_OUT"
-          exit $APPLY_EXIT
+          terraform apply -auto-approve -input=false -var="student_id=${{ matrix.student_id }}" -var="region=${{ env.AWS_REGION }}"
         continue-on-error: false
 
-      - name: Copy state to S3 (backup)
-        if: always()
+      - name: Outputs
+        if: success()
         run: |
-          BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
-          aws s3 mb "s3://${BUCKET}" 2>/dev/null || true
           cd modules/${{ github.event.inputs.module }}
           terraform workspace select ${{ matrix.student_id }} 2>/dev/null || true
-          STATE_OUT="terraform.tfstate.${{ matrix.student_id }}"
-          terraform state pull > "$STATE_OUT" 2>/dev/null && aws s3 cp "$STATE_OUT" "s3://${BUCKET}/$STATE_OUT" && echo "State saved to S3 (backup)." || echo "State file not found or upload failed; skipping."
-          rm -f "$STATE_OUT"
-
-      - name: Outputs
-        run: |
-          cd modules/${{ github.event.inputs.module }}
           terraform output

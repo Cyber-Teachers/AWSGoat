@@ -53,33 +53,20 @@ jobs:
         echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
         aws configure set region ${{ env.AWS_REGION }}
 
-    # Copy terraform.tfstate from S3 (default: single file; multi-student: after init+workspace)
-    - name: Retrieve tfstate (default)
-      if: env.STUDENT_ID == 'default'
+    - name: Terraform Init (S3 backend)
       run: |
         cd modules/${{ github.event.inputs.module }}
-        aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate ./terraform.tfstate
-      continue-on-error: true
-
-    # Initialize Terraform (required before workspace exists for multi-student)
-    - name: Terraform Init
-      run: |
-        cd modules/${{ github.event.inputs.module }}
-        terraform init
+        terraform init -reconfigure -input=false \
+          -backend-config="bucket=do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}" \
+          -backend-config="key=terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="workspace_key_prefix=${{ github.event.inputs.module }}"
 
     - name: Terraform Workspace (multi-student)
       if: env.STUDENT_ID != 'default'
       run: |
         cd modules/${{ github.event.inputs.module }}
         terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
-
-    - name: Retrieve tfstate (multi-student)
-      if: env.STUDENT_ID != 'default'
-      run: |
-        cd modules/${{ github.event.inputs.module }}
-        mkdir -p .terraform.tfstate.d/${{ env.STUDENT_ID }}
-        aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ env.STUDENT_ID }} .terraform.tfstate.d/${{ env.STUDENT_ID }}/terraform.tfstate
-      continue-on-error: true
 
     - name: Terraform Destroy
       run: |

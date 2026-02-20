@@ -1,4 +1,8 @@
 terraform {
+  backend "s3" {
+    # Partial config: pass bucket, key, region, workspace_key_prefix via -backend-config in CI (e.g. tf-apply-bulk.yml).
+    # See: https://developer.hashicorp.com/terraform/language/settings/backends/s3
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"

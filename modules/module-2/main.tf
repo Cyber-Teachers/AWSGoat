@@ -1,8 +1,12 @@
 terraform {
+  backend "s3" {
+    # Partial config: pass bucket, key, region, workspace_key_prefix via -backend-config in CI (e.g. tf-apply-bulk.yml).
+    # See: https://developer.hashicorp.com/terraform/language/settings/backends/s3
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.38"
+      version = "~> 3.27"
     }
   }
 }
@@ -483,6 +487,18 @@ resource "aws_lb_target_group" "target_group" {
   protocol    = "HTTP"
   target_type = "instance"
   vpc_id      = aws_vpc.lab-vpc.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200"
+    path                = "/login.php"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    timeout             = 5
+    unhealthy_threshold = 3
+  }
 
   tags = merge(local.common_tags, {
     Name = "aws-goat-m2-tg${local.name_suffix}"

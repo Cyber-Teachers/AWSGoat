@@ -40,53 +40,44 @@ jobs:
           echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
           aws configure set region ${{ env.AWS_REGION }}
 
-      - name: List state keys in S3
-        id: list-keys
+      - name: List workspaces (S3 backend keys)
+        id: list-workspaces
         run: |
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
-          aws s3 ls "s3://${BUCKET}/" --output text | awk '{print $4}' | grep -E '^terraform\.tfstate($|\.)' > state_keys.txt || true
-          echo "State keys found:"
-          cat state_keys.txt || echo "(none)"
+          aws s3 ls "s3://${BUCKET}/" --recursive --output text 2>/dev/null | awk '{print $4}' | while read -r key; do
+            if [[ "$key" == *"/env:/"*"/terraform.tfstate" ]]; then
+              mod="${key%%/env:*}"
+              rest="${key#*env:/}"
+              ws="${rest%%/terraform.tfstate*}"
+              echo "$mod $ws"
+            fi
+          done > workspace_list.txt || true
+          echo "Workspaces (module student_id):"
+          cat workspace_list.txt 2>/dev/null || echo "(none)"
 
-      - name: Destroy all (module-1 and module-2, each student state)
+      - name: Destroy all (module-1 and module-2, each workspace)
         run: |
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
           ROOT="$GITHUB_WORKSPACE"
 
-          if [ ! -s "$ROOT/state_keys.txt" ]; then
-            echo "No state keys found in S3; nothing to destroy."
-            exit 0
-          fi
-
-          for MODULE in module-1 module-2; do
-            echo "=== Initializing $MODULE ==="
-            cd "$ROOT/modules/$MODULE"
-            terraform init -input=false
-
-            while IFS= read -r key; do
-              [ -z "$key" ] && continue
-              if [ "$key" = "terraform.tfstate" ]; then
-                STUDENT_ID="default"
-              else
-                STUDENT_ID="${key#terraform.tfstate.}"
-              fi
-
+          if [ ! -s "$ROOT/workspace_list.txt" ]; then
+            echo "No workspace state found in S3; nothing to destroy."
+          else
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              MODULE="${line%% *}"
+              STUDENT_ID="${line#* }"
               echo "--- Destroying $MODULE student_id=$STUDENT_ID ---"
               cd "$ROOT/modules/$MODULE"
-
-              if [ "$STUDENT_ID" = "default" ]; then
-                aws s3 cp "s3://${BUCKET}/terraform.tfstate" ./terraform.tfstate 2>/dev/null || true
-                terraform workspace select default 2>/dev/null || true
-              else
-                mkdir -p ".terraform.tfstate.d/$STUDENT_ID"
-                aws s3 cp "s3://${BUCKET}/terraform.tfstate.${STUDENT_ID}" ".terraform.tfstate.d/${STUDENT_ID}/terraform.tfstate" 2>/dev/null || true
-                terraform workspace select "$STUDENT_ID" 2>/dev/null || terraform workspace new "$STUDENT_ID"
-              fi
-
+              terraform init -reconfigure -input=false \
+                -backend-config="bucket=${BUCKET}" \
+                -backend-config="key=terraform.tfstate" \
+                -backend-config="region=${{ env.AWS_REGION }}" \
+                -backend-config="workspace_key_prefix=${MODULE}"
+              terraform workspace select "$STUDENT_ID" 2>/dev/null || true
               terraform destroy -auto-approve -input=false -var="student_id=${STUDENT_ID}" -var="region=${{ env.AWS_REGION }}" || true
-            done < "$ROOT/state_keys.txt"
-          done
-
+            done < "$ROOT/workspace_list.txt"
+          fi
           echo "=== Destroy all completed ==="
 
       - name: Delete all resources tagged Project=AWSGoat

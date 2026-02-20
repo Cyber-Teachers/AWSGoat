@@ -53,40 +53,29 @@ jobs:
         echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
         aws configure set region ${{ env.AWS_REGION }}
 
-    - name: Check previous AWSGoat Deployment (default only)
-      id: check 
+    - name: Ensure state bucket exists
       run: |
-        echo ${{ env.ACCOUNT_ID }}
-        if [ "${{ env.STUDENT_ID }}" = "default" ]; then
-          aws s3api head-object --bucket do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }} --key terraform.tfstate
+        BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
+        if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+          cd backend-bootstrap
+          terraform init -input=false
+          terraform apply -auto-approve -input=false -var="region=${{ env.AWS_REGION }}"
         fi
-      continue-on-error: true
 
-    - name: Exit if previous deployment exists
-      if: env.STUDENT_ID == 'default' && steps.check.outcome == 'success'
+    - name: Terraform Init (S3 backend)
       run: |
-        echo "A Previous AWSGoat deployment exists, run the Terraform Destroy Action"
-        exit 1
-
-    # Initialize a new or existing Terraform working directory 
-    - name: Terraform Init
-      run: | 
         cd modules/${{ github.event.inputs.module }}
-        terraform init 
+        terraform init -reconfigure -input=false \
+          -backend-config="bucket=do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}" \
+          -backend-config="key=terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}" \
+          -backend-config="workspace_key_prefix=${{ github.event.inputs.module }}"
 
     - name: Terraform Workspace (multi-student)
       if: env.STUDENT_ID != 'default'
       run: |
         cd modules/${{ github.event.inputs.module }}
         terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
-
-    - name: Restore state for student (multi-student)
-      if: env.STUDENT_ID != 'default'
-      run: |
-        cd modules/${{ github.event.inputs.module }}
-        mkdir -p .terraform.tfstate.d/${{ env.STUDENT_ID }}
-        aws s3 cp s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ env.STUDENT_ID }} .terraform.tfstate.d/${{ env.STUDENT_ID }}/terraform.tfstate 2>/dev/null || true
-      continue-on-error: true
         
     # Installs boto3
     - uses: actions/setup-python@v5
@@ -111,7 +100,7 @@ jobs:
       run: exit 1
     
     - name: Terraform Apply
-      run: | 
+      run: |
         cd modules/${{ github.event.inputs.module }}
         if [ "${{ env.STUDENT_ID }}" != "default" ]; then
           terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
@@ -119,23 +108,7 @@ jobs:
         terraform apply -auto-approve -input=false -var="student_id=${{ env.STUDENT_ID }}" -var="region=${{ env.AWS_REGION }}"
       continue-on-error: false
 
-    # Copy tfstate file to s3 bucket
-    - name: Copy terraform.tfstate file to s3bucket
-      if: always()
-      run: |
-        cd modules/${{ github.event.inputs.module }}
-        if [ "${{ env.STUDENT_ID }}" = "default" ]; then
-          if [ -f ./terraform.tfstate ]; then
-            aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate
-          fi
-        else
-          STATE_FILE=".terraform.tfstate.d/${{ env.STUDENT_ID }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            aws s3 cp "$STATE_FILE" s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate.${{ env.STUDENT_ID }}
-          else
-            echo "State file $STATE_FILE not found (apply may have failed or workspace state not written); skipping upload."
-          fi
-        fi
+    # State is stored in S3 by the backend; no manual copy needed.
 
     # Terraform Output the API Gateway url
     - name: Application URL
