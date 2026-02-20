@@ -3449,17 +3449,7 @@ resource "aws_s3_object" "upload_temp_object_2" {
   content_type = lookup(local.content_type_map, regex("\\.(?P<extension>[A-Za-z0-9]+)$", each.value).extension, "application/octet-stream")
   depends_on   = [aws_s3_bucket.bucket_upload, null_resource.file_replacement_lambda_react, aws_s3_bucket_acl.bucket_temp]
 }
-/* Creating a S3 Bucket for Terraform state file upload. Only for default deployment; multi-student deployments share this bucket (state key per student). */
-resource "aws_s3_bucket" "bucket_tf_files" {
-  count         = var.student_id == "default" ? 1 : 0
-  bucket        = "do-not-delete-awsgoat-state-files-${data.aws_caller_identity.current.account_id}-${var.region}"
-  force_destroy = true
-  tags = merge(local.common_tags, {
-    Name        = "Do not delete Bucket"
-    Environment = "Dev"
-  })
-}
-
+# State bucket is created by backend-bootstrap; see -backend-config in CI workflows.
 
 # VPC to deploy web app
 
