@@ -390,6 +390,7 @@ resource "aws_autoscaling_group" "ecs_asg" {
   desired_capacity    = 1
   min_size            = 0
   max_size            = 1
+  target_group_arns   = [aws_lb_target_group.target_group.arn]
 
   launch_template {
     id      = aws_launch_template.ecs_launch_template.id

@@ -124,12 +124,9 @@ jobs:
           terraform apply -auto-approve -input=false -var="student_id=${{ matrix.student_id }}" -var="region=${{ env.AWS_REGION }}" || APPLY_EXIT=$?
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
           aws s3 mb "s3://${BUCKET}" 2>/dev/null || true
-          STATE_FILE=".terraform.tfstate.d/${{ matrix.student_id }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            aws s3 cp "$STATE_FILE" "s3://${BUCKET}/terraform.tfstate.${{ matrix.student_id }}" && echo "State saved to S3 (even when apply failed)." || true
-          else
-            echo "State file not found at $STATE_FILE; skipping upload."
-          fi
+          STATE_OUT="terraform.tfstate.${{ matrix.student_id }}"
+          terraform state pull > "$STATE_OUT" 2>/dev/null && aws s3 cp "$STATE_OUT" "s3://${BUCKET}/$STATE_OUT" && echo "State saved to S3 (terraform state pull)." || echo "State upload skipped (state pull or upload failed)."
+          rm -f "$STATE_OUT"
           exit $APPLY_EXIT
         continue-on-error: false
 
@@ -139,12 +136,10 @@ jobs:
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
           aws s3 mb "s3://${BUCKET}" 2>/dev/null || true
           cd modules/${{ github.event.inputs.module }}
-          STATE_FILE=".terraform.tfstate.d/${{ matrix.student_id }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            aws s3 cp "$STATE_FILE" "s3://${BUCKET}/terraform.tfstate.${{ matrix.student_id }}"
-          else
-            echo "State file not found; skipping upload."
-          fi
+          terraform workspace select ${{ matrix.student_id }} 2>/dev/null || true
+          STATE_OUT="terraform.tfstate.${{ matrix.student_id }}"
+          terraform state pull > "$STATE_OUT" 2>/dev/null && aws s3 cp "$STATE_OUT" "s3://${BUCKET}/$STATE_OUT" && echo "State saved to S3 (backup)." || echo "State file not found or upload failed; skipping."
+          rm -f "$STATE_OUT"
 
       - name: Outputs
         run: |
