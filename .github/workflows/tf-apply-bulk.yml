@@ -62,8 +62,9 @@ jobs:
       - name: Set Account ID and Region
         run: |
           echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
-          echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
-          aws configure set region ${{ env.AWS_REGION }}
+          REGION="${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}"
+          echo "AWS_REGION=$REGION" >> $GITHUB_ENV
+          aws configure set region "$REGION"
       - name: Create state bucket if missing
         run: |
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}"
@@ -108,8 +109,9 @@ jobs:
         id: account
         run: |
           echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
-          echo "AWS_REGION=${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}" >> $GITHUB_ENV
-          aws configure set region ${{ env.AWS_REGION }}
+          REGION="${{ github.event.inputs.region || env.AWS_REGION || 'eu-west-3' }}"
+          echo "AWS_REGION=$REGION" >> $GITHUB_ENV
+          aws configure set region "$REGION"
 
       - name: Ensure state bucket exists
         run: |
