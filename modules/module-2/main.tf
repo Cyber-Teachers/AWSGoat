@@ -200,7 +200,6 @@ resource "aws_security_group" "load_balancer_security_group" {
 resource "aws_iam_role" "ecs-instance-role" {
   name                 = "ecs-instance-role${local.name_suffix}"
   path                 = "/"
-  tags                 = local.common_tags
   permissions_boundary = aws_iam_policy.instance_boundary_policy.arn
   assume_role_policy = jsonencode({
     "Version" : "2008-10-17",
@@ -234,7 +233,6 @@ resource "aws_iam_role_policy_attachment" "ecs-instance-role-attachment-3" {
 
 resource "aws_iam_policy" "ecs_instance_policy" {
   name   = "aws-goat-instance-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -255,7 +253,6 @@ resource "aws_iam_policy" "ecs_instance_policy" {
 
 resource "aws_iam_policy" "instance_boundary_policy" {
   name   = "aws-goat-instance-boundary-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -290,7 +287,6 @@ resource "aws_iam_instance_profile" "ec2-deployer-profile" {
 resource "aws_iam_role" "ec2-deployer-role" {
   name               = "ec2Deployer-role${local.name_suffix}"
   path               = "/"
-  tags               = local.common_tags
   assume_role_policy = jsonencode({
     "Version" : "2008-10-17",
     "Statement" : [
@@ -308,7 +304,6 @@ resource "aws_iam_role" "ec2-deployer-role" {
 
 resource "aws_iam_policy" "ec2_deployer_admin_policy" {
   name   = "ec2DeployerAdmin-policy${local.name_suffix}"
-  tags   = local.common_tags
   policy = jsonencode({
     "Statement" : [
       {
@@ -337,7 +332,6 @@ resource "aws_iam_instance_profile" "ecs-instance-profile" {
 resource "aws_iam_role" "ecs-task-role" {
   name               = "ecs-task-role${local.name_suffix}"
   path               = "/"
-  tags               = local.common_tags
   assume_role_policy = jsonencode({
     "Version" : "2012-10-17",
     "Statement" : [
