@@ -30,7 +30,7 @@ if [ -z "$ACCOUNT_ID" ]; then
   exit 0
 fi
 
-terraform workspace select "$STUDENT_ID" 2>/dev/null || true
+terraform workspace select "$STUDENT_ID" 2>/dev/null || terraform workspace new "$STUDENT_ID"
 
 run_import() {
   local addr="$1"
