@@ -34,16 +34,14 @@ fi
 
 terraform workspace select "$STUDENT_ID" 2>/dev/null || terraform workspace new "$STUDENT_ID"
 
+# Import only if the resource is not already in state (avoids "Resource already managed" noise).
 run_import() {
   local addr="$1"
   local id="$2"
-  local quiet="${3:-true}"
-  if [ "$quiet" = "true" ]; then
-    terraform import -input=false -var="student_id=$STUDENT_ID" -var="region=$REGION" "$addr" "$id" 2>/dev/null || true
-  else
-    echo "Importing $addr $id"
-    terraform import -input=false -var="student_id=$STUDENT_ID" -var="region=$REGION" "$addr" "$id" || true
+  if terraform state show "$addr" &>/dev/null; then
+    return 0
   fi
+  terraform import -input=false -var="student_id=$STUDENT_ID" -var="region=$REGION" "$addr" "$id" 2>/dev/null || true
 }
 
 if [ "$MODULE" = "module-2" ]; then
@@ -56,8 +54,8 @@ if [ "$MODULE" = "module-2" ]; then
   run_import "aws_iam_policy.ec2_deployer_admin_policy" "arn:aws:iam::${ACCOUNT_ID}:policy/ec2DeployerAdmin-policy${SUFFIX}"
   run_import "aws_iam_role.ecs-task-role" "ecs-task-role${SUFFIX}"
   run_import "aws_iam_role.ecs-instance-role" "ecs-instance-role${SUFFIX}"
-  run_import "aws_iam_instance_profile.ec2-deployer-profile" "ec2Deployer${SUFFIX}" "false"
-  run_import "aws_iam_instance_profile.ecs-instance-profile" "ecs-instance-profile${SUFFIX}" "false"
+  run_import "aws_iam_instance_profile.ec2-deployer-profile" "ec2Deployer${SUFFIX}"
+  run_import "aws_iam_instance_profile.ecs-instance-profile" "ecs-instance-profile${SUFFIX}"
   run_import "aws_secretsmanager_secret.rds_creds" "RDS_CREDS${SUFFIX}"
   run_import "aws_db_subnet_group.database-subnet-group" "database-subnets${SUFFIX}"
   # ALB and target group: import by ARN (look up by name)
