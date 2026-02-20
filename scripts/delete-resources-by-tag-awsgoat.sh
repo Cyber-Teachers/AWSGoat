@@ -65,23 +65,43 @@ delete_ecs_services_and_clusters() {
 }
 
 delete_albs_and_tgs() {
+  # describe-load-balancers does NOT return Tags; use name pattern for module-2 ALBs and tag-based via describe-tags for others
   local albs
-  albs=$(aws elbv2 describe-load-balancers --region "$REGION" --query 'LoadBalancers[].[LoadBalancerArn,Tags]' --output json 2>/dev/null) || true
-  echo "$albs" | jq -r --arg k "$TAG_KEY" --arg v "$TAG_VALUE" '
-    .[] | select(.[1][]? | select(.Key==$k and .Value==$v)) | .[0]
-  ' 2>/dev/null | while read -r arn; do
+  albs=$(aws elbv2 describe-load-balancers --region "$REGION" --query 'LoadBalancers[].[LoadBalancerArn,LoadBalancerName]' --output json 2>/dev/null) || true
+  echo "$albs" | jq -r '.[] | select(.[1] | test("^aws-goat-m2-alb")) | .[0]' 2>/dev/null | while read -r arn; do
     [ -z "$arn" ] && continue
     echo "Deleting ALB $arn"
     aws elbv2 delete-load-balancer --load-balancer-arn "$arn" --region "$REGION" 2>/dev/null || true
   done
-  local tgs
-  tgs=$(aws elbv2 describe-target-groups --region "$REGION" --query 'TargetGroups[].[TargetGroupArn,Tags]' --output json 2>/dev/null) || true
-  echo "$tgs" | jq -r --arg k "$TAG_KEY" --arg v "$TAG_VALUE" '
-    .[] | select(.[1][]? | select(.Key==$k and .Value==$v)) | .[0]
-  ' 2>/dev/null | while read -r arn; do
+  # Tag-based ALB fallback: get tags via describe-tags (describe-load-balancers doesn't return tags)
+  local all_alb_arns
+  all_alb_arns=$(aws elbv2 describe-load-balancers --region "$REGION" --query 'LoadBalancers[].LoadBalancerArn' --output text 2>/dev/null) || true
+  if [ -n "$all_alb_arns" ]; then
+    for arn in $all_alb_arns; do
+      [ -z "$arn" ] && continue
+      tags=$(aws elbv2 describe-tags --resource-arns "$arn" --region "$REGION" --query "TagDescriptions[?ResourceArn=='$arn'].Tags[]" --output json 2>/dev/null) || true
+      if echo "$tags" | jq -e --arg k "$TAG_KEY" --arg v "$TAG_VALUE" '.[]? | select(.Key==$k and .Value==$v)' >/dev/null 2>&1; then
+        echo "Deleting ALB (by tag) $arn"
+        aws elbv2 delete-load-balancer --load-balancer-arn "$arn" --region "$REGION" 2>/dev/null || true
+      fi
+    done
+  fi
+  # Target groups: delete by name pattern (module-2 aws-goat-m2-tg*); use text output for reliable parsing
+  aws elbv2 describe-target-groups --region "$REGION" --query 'TargetGroups[].[TargetGroupArn,TargetGroupName]' --output text 2>/dev/null | while IFS=$'\t' read -r arn name; do
     [ -z "$arn" ] && continue
-    echo "Deleting target group $arn"
-    aws elbv2 delete-target-group --target-group-arn "$arn" --region "$REGION" 2>/dev/null || true
+    case "$name" in
+      aws-goat-m2-tg*) echo "Deleting target group $name ($arn)"; aws elbv2 delete-target-group --target-group-arn "$arn" --region "$REGION" 2>/dev/null || true ;;
+      *) ;;
+    esac
+  done
+  # Second pass: any remaining TGs with Project=AWSGoat tag
+  aws elbv2 describe-target-groups --region "$REGION" --query 'TargetGroups[].TargetGroupArn' --output text 2>/dev/null | while read -r arn; do
+    [ -z "$arn" ] && continue
+    tg_tags=$(aws elbv2 describe-tags --resource-arns "$arn" --region "$REGION" --output json 2>/dev/null | jq -r '.TagDescriptions[0].Tags[]? | "\(.Key)=\(.Value)"' 2>/dev/null) || true
+    if echo "$tg_tags" | grep -q "^${TAG_KEY}=${TAG_VALUE}$"; then
+      echo "Deleting target group (by tag) $arn"
+      aws elbv2 delete-target-group --target-group-arn "$arn" --region "$REGION" 2>/dev/null || true
+    fi
   done
 }
 
@@ -186,10 +206,41 @@ delete_asgs_and_launch_templates() {
   done
 }
 
+# Delete security groups by name and by tag; skip default SG; retry loop for cross-refs
+delete_sgs_by_name_and_tag() {
+  local patterns="ECS-SG Database-Security-Group Load-Balancer-SG aws-goat-m2-sg rds-db-sg aws-goat-db-sg"
+  local pass=0
+  while [ $pass -lt 5 ]; do
+    pass=$((pass + 1))
+    # By name: known AWSGoat SG name patterns
+    aws ec2 describe-security-groups --region "$REGION" --query 'SecurityGroups[].[GroupId,GroupName]' --output text 2>/dev/null | while IFS=$'\t' read -r gid gname; do
+      [ -z "$gid" ] && continue
+      [ "$gname" = "default" ] && continue
+      for p in $patterns; do
+        case "$gname" in
+          ${p}*) echo "Deleting security group (by name) $gname ($gid)"; aws ec2 delete-security-group --group-id "$gid" --region "$REGION" 2>/dev/null || true; break ;;
+          *) ;;
+        esac
+      done
+    done
+    # By tag: Project=AWSGoat
+    aws ec2 describe-security-groups --region "$REGION" --filters "Name=tag:${TAG_KEY},Values=${TAG_VALUE}" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null | while read -r gid; do
+      [ -z "$gid" ] && continue
+      gname=$(aws ec2 describe-security-groups --region "$REGION" --group-ids "$gid" --query 'SecurityGroups[0].GroupName' --output text 2>/dev/null) || true
+      [ "$gname" = "default" ] && continue
+      echo "Deleting security group (by tag) $gname ($gid)"
+      aws ec2 delete-security-group --group-id "$gid" --region "$REGION" 2>/dev/null || true
+    done
+    sleep 2
+  done
+}
+
 delete_ec2_sgs_vpc_subnets_igw() {
+  delete_sgs_by_name_and_tag
   local vpcs
   vpcs=$(aws ec2 describe-vpcs --region "$REGION" --filters "Name=tag:${TAG_KEY},Values=${TAG_VALUE}" --query 'Vpcs[].VpcId' --output text 2>/dev/null) || true
   for vpc in $vpcs; do
+    [ -z "$vpc" ] || [ "$vpc" = "None" ] && continue
     echo "Cleaning VPC $vpc..."
     local subnets
     subnets=$(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[].SubnetId' --output text 2>/dev/null) || true
@@ -208,8 +259,9 @@ delete_ec2_sgs_vpc_subnets_igw() {
       aws ec2 delete-route-table --route-table-id "$rt" --region "$REGION" 2>/dev/null || true
     done
     local sgs
-    sgs=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null) || true
+    sgs=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null) || true
     for sg in $sgs; do
+      [ -z "$sg" ] && continue
       aws ec2 delete-security-group --group-id "$sg" --region "$REGION" 2>/dev/null || true
     done
     aws ec2 delete-vpc --vpc-id "$vpc" --region "$REGION" 2>/dev/null || true
