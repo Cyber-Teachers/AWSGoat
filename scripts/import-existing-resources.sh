@@ -58,11 +58,47 @@ if [ "$MODULE" = "module-2" ]; then
   run_import "aws_iam_instance_profile.ecs-instance-profile" "ecs-instance-profile${SUFFIX}"
   run_import "aws_secretsmanager_secret.rds_creds" "RDS_CREDS${SUFFIX}"
   run_import "aws_db_subnet_group.database-subnet-group" "database-subnets${SUFFIX}"
+  run_import "aws_db_instance.database-instance" "aws-goat-db${SUFFIX}"
+
+  # Security groups (by id, looked up by name in VPC)
+  SG_ECS=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=ECS-SG${SUFFIX}" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null) || true
+  [ -n "$SG_ECS" ] && [ "$SG_ECS" != "None" ] && run_import "aws_security_group.ecs_sg" "$SG_ECS"
+  SG_DB=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=Database-Security-Group${SUFFIX}" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null) || true
+  [ -n "$SG_DB" ] && [ "$SG_DB" != "None" ] && run_import "aws_security_group.database-security-group" "$SG_DB"
+  SG_LB=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=Load-Balancer-SG${SUFFIX}" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null) || true
+  [ -n "$SG_LB" ] && [ "$SG_LB" != "None" ] && run_import "aws_security_group.load_balancer_security_group" "$SG_LB"
+
+  # Subnets (by id)
+  SUBNET1=$(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:Name,Values=lab-subnet-public-1${SUFFIX}" --query 'Subnets[0].SubnetId' --output text 2>/dev/null) || true
+  [ -n "$SUBNET1" ] && [ "$SUBNET1" != "None" ] && run_import "aws_subnet.lab-subnet-public-1" "$SUBNET1"
+  SUBNET2=$(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:Name,Values=lab-subnet-public-1b${SUFFIX}" --query 'Subnets[0].SubnetId' --output text 2>/dev/null) || true
+  [ -n "$SUBNET2" ] && [ "$SUBNET2" != "None" ] && run_import "aws_subnet.lab-subnet-public-1b" "$SUBNET2"
+
+  # Internet gateway and route table
+  IGW_ID=$(aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=attachment.vpc-id,Values=${VPC_ID}" --query 'InternetGateways[0].InternetGatewayId' --output text 2>/dev/null) || true
+  [ -n "$IGW_ID" ] && [ "$IGW_ID" != "None" ] && run_import "aws_internet_gateway.my_vpc_igw" "$IGW_ID"
+  RT_ID=$(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=${VPC_ID}" "Name=tag:Name,Values=Public-Subnet-RT${SUFFIX}" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null) || true
+  [ -n "$RT_ID" ] && [ "$RT_ID" != "None" ] && run_import "aws_route_table.my_vpc_us_east_1_public_rt" "$RT_ID"
+
   # ALB and target group: import by ARN (look up by name)
   ALB_ARN=$(aws elbv2 describe-load-balancers --region "$REGION" --names "aws-goat-m2-alb${SUFFIX}" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)
   [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] && run_import "aws_alb.application_load_balancer" "$ALB_ARN"
   TG_ARN=$(aws elbv2 describe-target-groups --region "$REGION" --names "aws-goat-m2-tg${SUFFIX}" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)
   [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ] && run_import "aws_lb_target_group.target_group" "$TG_ARN"
+  LISTENER_ARN=$(aws elbv2 describe-listeners --region "$REGION" --load-balancer-arn "$ALB_ARN" --query 'Listeners[0].ListenerArn' --output text 2>/dev/null) || true
+  [ -n "$LISTENER_ARN" ] && [ "$LISTENER_ARN" != "None" ] && run_import "aws_lb_listener.listener" "$LISTENER_ARN"
+
+  # ECS cluster, task definition, service
+  run_import "aws_ecs_cluster.cluster" "ecs-lab-cluster${SUFFIX}"
+  TASK_ARN=$(aws ecs list-task-definitions --region "$REGION" --family-prefix "ECS-Lab-Task-definition${SUFFIX}" --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text 2>/dev/null) || true
+  [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ] && run_import "aws_ecs_task_definition.task_definition" "$TASK_ARN"
+  run_import "aws_ecs_service.worker" "ecs-lab-cluster${SUFFIX}/ecs_service_worker${SUFFIX}"
+
+  # Launch template and ASG
+  LT_ID=$(aws ec2 describe-launch-templates --region "$REGION" --filters "Name=tag:Name,Values=ecs-launch-template${SUFFIX}" --query 'LaunchTemplates[0].LaunchTemplateId' --output text 2>/dev/null) || true
+  [ -n "$LT_ID" ] && [ "$LT_ID" != "None" ] && run_import "aws_launch_template.ecs_launch_template" "$LT_ID"
+  run_import "aws_autoscaling_group.ecs_asg" "ECS-lab-asg${SUFFIX}"
+
   echo "Import step finished (module-2)."
 elif [ "$MODULE" = "module-1" ]; then
   # Add module-1 imports here if we see similar EntityAlreadyExists errors
