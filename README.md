@@ -90,6 +90,14 @@ AWS_SECRET_ACCESS_KEY
   <img src="https://user-images.githubusercontent.com/65826354/184553744-c1ba94a1-0d67-4a86-b97d-ee7afe6c65fe.png">
 </p>
 
+### GitHub Actions workflows
+
+| Workflow | Use |
+|----------|-----|
+| **Terraform Apply** (`tf-apply-main.yml`) | Deploy a single lab instance: choose **module** (module-1 or module-2), optional **Student ID** (e.g. `student-01`) for multi-student, and optional **region**. Runs bootstrap if needed, imports existing resources when re-running, then applies Terraform. |
+| **Terraform Apply (Bulk)** (`tf-apply-bulk.yml`) | Deploy many lab instances in one run: set **Number of instances** (e.g. 5) and **Module**; student IDs `01`, `02`, … are used automatically. Runs up to 5 applies in parallel. Use for classrooms or multiple isolated labs in the same account. |
+| **Terraform Destroy** (`tf-destroy-main.yml`) | Remove one deployment: choose **module** and **Student ID** (must match the deploy). Destroys that workspace’s resources and state only. |
+| **Terraform Clean Up** (`tf-clean-up.yml`) | Remove all AWSGoat resources in the account: discovers all workspaces from the state bucket, runs `terraform destroy` for each (module-1 and module-2), empties and deletes the state bucket, then runs the tag-based cleanup script to delete any remaining resources tagged `Project=AWSGoat` (ALBs, target groups, RDS, SGs, IAM, etc.). Use when tearing down the entire lab environment. |
 
 ### Manual Installation
 
@@ -123,11 +131,12 @@ terraform apply --auto-approve
 
 You can deploy **multiple isolated lab instances** in the same AWS account (e.g. one per student). This is especially important for **privilege escalation scenarios**: each student gets their own IAM roles, S3 buckets, EC2/ECS resources, and escalation path so they do not interfere with each other.
 
-**GitHub Actions**
+**GitHub Actions** (see the [GitHub Actions workflows](#github-actions-workflows) table above for a description of each workflow)
 
 - When running **Terraform Apply**, optionally set **Student ID** (e.g. `student-01`, `student-02`). Leave empty for a single default deployment.
 - **Terraform Apply (Bulk)** launches multiple lab instances in one run: set **Number of instances** (e.g. 5) and **Module**; student IDs 01, 02, … are used automatically. Runs up to 5 applies in parallel.
 - When running **Terraform Destroy**, use the same **Student ID** you used for that deployment.
+- **Terraform Clean Up** removes all deployments and the state bucket, then deletes any remaining resources tagged `Project=AWSGoat`.
 - State is stored per student: `terraform.tfstate` (default) or `terraform.tfstate.<student_id>`.
 
 **Manual (CLI)**

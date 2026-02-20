@@ -64,6 +64,22 @@ delete_ecs_services_and_clusters() {
   done
 }
 
+# Deregister ECS task definitions by family prefix (module-2: ECS-Lab-Task-definition); not deleted when service/cluster are removed
+delete_ecs_task_definitions() {
+  local next_token=""
+  while true; do
+    local json
+    json=$(aws ecs list-task-definitions --region "$REGION" --family-prefix "ECS-Lab-Task-definition" $([ -n "$next_token" ] && echo "--starting-token $next_token") --output json 2>/dev/null) || break
+    echo "$json" | jq -r '.taskDefinitionArns[]? // empty' 2>/dev/null | while read -r arn; do
+      [ -z "$arn" ] && continue
+      echo "Deregistering ECS task definition $arn"
+      aws ecs deregister-task-definition --task-definition "$arn" --region "$REGION" 2>/dev/null || true
+    done
+    next_token=$(echo "$json" | jq -r '.nextToken // empty' 2>/dev/null)
+    [ -z "$next_token" ] && break
+  done
+}
+
 delete_albs_and_tgs() {
   # describe-load-balancers does NOT return Tags; use name pattern for module-2 ALBs and tag-based via describe-tags for others
   local albs
@@ -114,6 +130,27 @@ delete_rds_instances() {
     [ -z "$id" ] && continue
     echo "Deleting RDS instance $id"
     aws rds delete-db-instance --db-instance-identifier "$id" --skip-final-snapshot --delete-automated-backups --region "$REGION" 2>/dev/null || true
+  done
+}
+
+# RDS DB subnet groups (module-2); delete after instances so no DependencyViolation
+delete_rds_db_subnet_groups() {
+  local groups
+  groups=$(aws rds describe-db-subnet-groups --region "$REGION" --query 'DBSubnetGroups[].[DBSubnetGroupName,TagList]' --output json 2>/dev/null) || true
+  echo "$groups" | jq -r --arg k "$TAG_KEY" --arg v "$TAG_VALUE" '
+    .[] | select(.[1][]? | select(.Key==$k and .Value==$v)) | .[0]
+  ' 2>/dev/null | while read -r name; do
+    [ -z "$name" ] && continue
+    echo "Deleting RDS DB subnet group $name"
+    aws rds delete-db-subnet-group --db-subnet-group-name "$name" --region "$REGION" 2>/dev/null || true
+  done
+  # By name pattern (module-2: database-subnets*)
+  aws rds describe-db-subnet-groups --region "$REGION" --query 'DBSubnetGroups[].DBSubnetGroupName' --output text 2>/dev/null | while read -r name; do
+    [ -z "$name" ] && continue
+    case "$name" in
+      database-subnets*) echo "Deleting RDS DB subnet group (by name) $name"; aws rds delete-db-subnet-group --db-subnet-group-name "$name" --region "$REGION" 2>/dev/null || true ;;
+      *) ;;
+    esac
   done
 }
 
@@ -235,8 +272,30 @@ delete_sgs_by_name_and_tag() {
   done
 }
 
+# Delete internet gateways by tag and by name; detach from VPC first (catches orphaned IGWs if VPC was already removed)
+delete_igws_by_tag_and_name() {
+  # By tag: Project=AWSGoat
+  aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=tag:${TAG_KEY},Values=${TAG_VALUE}" --query 'InternetGateways[].[InternetGatewayId,Attachments[0].VpcId]' --output text 2>/dev/null | while IFS=$'\t' read -r igw vpc; do
+    [ -z "$igw" ] || [ "$igw" = "None" ] && continue
+    [ -n "$vpc" ] && [ "$vpc" != "None" ] && aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc" --region "$REGION" 2>/dev/null || true
+    echo "Deleting internet gateway (by tag) $igw"
+    aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region "$REGION" 2>/dev/null || true
+  done
+  # By name pattern (module-2: My-VPC-IGW)
+  aws ec2 describe-internet-gateways --region "$REGION" --query "InternetGateways[].[InternetGatewayId,Tags[?Key=='Name'].Value | [0],Attachments[0].VpcId]" --output text 2>/dev/null | while IFS=$'\t' read -r igw name vpc; do
+    [ -z "$igw" ] || [ "$igw" = "None" ] && continue
+    case "$name" in
+      My-VPC-IGW*) [ -n "$vpc" ] && [ "$vpc" != "None" ] && aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc" --region "$REGION" 2>/dev/null || true
+                   echo "Deleting internet gateway (by name) $name $igw"
+                   aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region "$REGION" 2>/dev/null || true ;;
+      *) ;;
+    esac
+  done
+}
+
 delete_ec2_sgs_vpc_subnets_igw() {
   delete_sgs_by_name_and_tag
+  delete_igws_by_tag_and_name
   local vpcs
   vpcs=$(aws ec2 describe-vpcs --region "$REGION" --filters "Name=tag:${TAG_KEY},Values=${TAG_VALUE}" --query 'Vpcs[].VpcId' --output text 2>/dev/null) || true
   for vpc in $vpcs; do
@@ -250,6 +309,7 @@ delete_ec2_sgs_vpc_subnets_igw() {
     local igws
     igws=$(aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=attachment.vpc-id,Values=$vpc" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null) || true
     for igw in $igws; do
+      [ -z "$igw" ] && continue
       aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc" --region "$REGION" 2>/dev/null || true
       aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region "$REGION" 2>/dev/null || true
     done
@@ -340,10 +400,13 @@ delete_iam_awsgoat_by_name() {
 delete_ec2_instances
 sleep 10
 delete_ecs_services_and_clusters
+delete_ecs_task_definitions
 sleep 5
 delete_asgs_and_launch_templates
 delete_albs_and_tgs
 delete_rds_instances
+sleep 15
+delete_rds_db_subnet_groups
 delete_lambda_functions
 delete_apigateway_apis
 delete_dynamodb_tables

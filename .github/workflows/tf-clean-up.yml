@@ -1,4 +1,4 @@
-name: 'Terraform Destroy All'
+name: 'Terraform Clean Up'
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ on:
 permissions: write-all
 
 jobs:
-  destroy-all:
-    name: 'Destroy All Deployments'
+  clean-up:
+    name: 'Clean Up Deployments'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -56,30 +56,40 @@ jobs:
           echo "Workspaces (module student_id):"
           cat workspace_list.txt 2>/dev/null || echo "(none)"
 
-      - name: Destroy all (module-1 and module-2, each workspace)
+      - name: Clean up (module-1 and module-2, each workspace)
         run: |
           BUCKET="do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}-${{ env.AWS_REGION }}"
           ROOT="$GITHUB_WORKSPACE"
 
-          if [ ! -s "$ROOT/workspace_list.txt" ]; then
-            echo "No workspace state found in S3; nothing to destroy."
-          else
+          run_destroy() {
+            local mod="$1"
+            local sid="$2"
+            echo "--- Cleaning up $mod student_id=$sid ---"
+            cd "$ROOT/modules/$mod"
+            terraform init -reconfigure -input=false \
+              -backend-config="bucket=${BUCKET}" \
+              -backend-config="key=terraform.tfstate" \
+              -backend-config="region=${{ env.AWS_REGION }}" \
+              -backend-config="workspace_key_prefix=${mod}"
+            terraform workspace select "$sid" 2>/dev/null || true
+            terraform destroy -auto-approve -input=false -var="student_id=${sid}" -var="region=${{ env.AWS_REGION }}" || true
+            cd "$ROOT"
+          }
+
+          if [ -s "$ROOT/workspace_list.txt" ]; then
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               MODULE="${line%% *}"
               STUDENT_ID="${line#* }"
-              echo "--- Destroying $MODULE student_id=$STUDENT_ID ---"
-              cd "$ROOT/modules/$MODULE"
-              terraform init -reconfigure -input=false \
-                -backend-config="bucket=${BUCKET}" \
-                -backend-config="key=terraform.tfstate" \
-                -backend-config="region=${{ env.AWS_REGION }}" \
-                -backend-config="workspace_key_prefix=${MODULE}"
-              terraform workspace select "$STUDENT_ID" 2>/dev/null || true
-              terraform destroy -auto-approve -input=false -var="student_id=${STUDENT_ID}" -var="region=${{ env.AWS_REGION }}" || true
+              run_destroy "$MODULE" "$STUDENT_ID"
             done < "$ROOT/workspace_list.txt"
+          else
+            echo "No workspace state found in S3; destroying default workspace for each module."
+            for MODULE in module-1 module-2; do
+              run_destroy "$MODULE" "default"
+            done
           fi
-          echo "=== Destroy all completed ==="
+          echo "=== Clean up completed ==="
 
       - name: Delete state bucket (bootstrap S3)
         run: |
@@ -89,8 +99,13 @@ jobs:
             exit 0
           fi
           echo "Emptying versioned state bucket: $BUCKET"
+          KEY_MARKER=""
+          VERSION_ID_MARKER=""
           while true; do
-            out=$(aws s3api list-object-versions --bucket "$BUCKET" --output json 2>/dev/null) || break
+            args=(--bucket "$BUCKET" --output json)
+            [ -n "$KEY_MARKER" ] && args+=(--key-marker "$KEY_MARKER")
+            [ -n "$VERSION_ID_MARKER" ] && args+=(--version-id-marker "$VERSION_ID_MARKER")
+            out=$(aws s3api list-object-versions "${args[@]}" 2>/dev/null) || break
             echo "$out" | jq -c '.Versions[]? | {Key, VersionId}' 2>/dev/null | while read -r obj; do
               [ -z "$obj" ] && continue
               aws s3api delete-object --bucket "$BUCKET" --key "$(echo "$obj" | jq -r .Key)" --version-id "$(echo "$obj" | jq -r .VersionId)" 2>/dev/null || true
@@ -99,8 +114,11 @@ jobs:
               [ -z "$obj" ] && continue
               aws s3api delete-object --bucket "$BUCKET" --key "$(echo "$obj" | jq -r .Key)" --version-id "$(echo "$obj" | jq -r .VersionId)" 2>/dev/null || true
             done
-            has_more=$(echo "$out" | jq -r '.Versions | length + (.DeleteMarkers | length)')
-            [ "${has_more:-0}" -eq 0 ] && break
+            truncated=$(echo "$out" | jq -r '.IsTruncated // false')
+            [ "$truncated" != "true" ] && break
+            KEY_MARKER=$(echo "$out" | jq -r '.NextKeyMarker // empty')
+            VERSION_ID_MARKER=$(echo "$out" | jq -r '.NextVersionIdMarker // empty')
+            [ -z "$KEY_MARKER" ] && [ -z "$VERSION_ID_MARKER" ] && break
           done
           echo "Deleting bucket: $BUCKET"
           aws s3 rb "s3://${BUCKET}" --force 2>/dev/null || aws s3api delete-bucket --bucket "$BUCKET"
@@ -111,4 +129,3 @@ jobs:
           chmod +x scripts/delete-resources-by-tag-awsgoat.sh
           ./scripts/delete-resources-by-tag-awsgoat.sh
         continue-on-error: true
-
