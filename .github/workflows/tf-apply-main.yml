@@ -77,7 +77,13 @@ jobs:
       run: |
         cd modules/${{ github.event.inputs.module }}
         terraform workspace select ${{ env.STUDENT_ID }} 2>/dev/null || terraform workspace new ${{ env.STUDENT_ID }}
-        
+
+    - name: Import existing resources (if any)
+      run: |
+        chmod +x scripts/import-existing-resources.sh
+        ACCOUNT_ID=${{ env.ACCOUNT_ID }} AWS_REGION=${{ env.AWS_REGION }} ./scripts/import-existing-resources.sh ${{ github.event.inputs.module }} ${{ env.STUDENT_ID }}
+      continue-on-error: true
+
     # Installs boto3
     - uses: actions/setup-python@v5
       with:
